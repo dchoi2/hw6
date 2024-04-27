@@ -274,6 +274,8 @@ private:
 
     // ADD MORE DATA MEMBERS HERE, AS NECESSARY
     double resizeAlpha_;
+    int numElements;
+    int totalNumElements;
 };
 
 // ----------------------------------------------------------------------------
@@ -298,6 +300,8 @@ HashTable<K,V,Prober,Hash,KEqual>::HashTable(
     // Initialize any other data members as necessary
   mIndex_ = 0;
   table_.resize(CAPACITIES[mIndex_], nullptr);
+  numElements = 0;
+  totalNumElements = 0;
 }
 
 // To be completed
@@ -348,8 +352,8 @@ size_t HashTable<K,V,Prober,Hash,KEqual>::size() const
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 void HashTable<K,V,Prober,Hash,KEqual>::insert(const ItemType& p)
 {
-  // if loading factor >= alpha
-  if((static_cast<double>(size()) / table_.size()) >= resizeAlpha_)
+  // if # elements (inlcuding deleted) / size >= alpha
+  if(((double)(totalNumElements) / table_.size()) >= resizeAlpha_)
   {
     resize();
   }
@@ -359,7 +363,7 @@ void HashTable<K,V,Prober,Hash,KEqual>::insert(const ItemType& p)
   {
     throw std::logic_error("No location available for insert");
   }
-  // if element exists (previously deleted) then override value
+  // if element exists then override value
   if(table_[idx] != nullptr)
   {
     table_[idx]->item.second = p.second;
@@ -369,6 +373,8 @@ void HashTable<K,V,Prober,Hash,KEqual>::insert(const ItemType& p)
   {
     // insert new HashItem
     table_[idx] = new HashItem(p);
+    numElements++;
+    totalNumElements++;
   }
 }
 
@@ -376,12 +382,14 @@ void HashTable<K,V,Prober,Hash,KEqual>::insert(const ItemType& p)
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 void HashTable<K,V,Prober,Hash,KEqual>::remove(const KeyType& key)
 {
-    HashItem* idxItem = internalFind(key);
-    if(idxItem != nullptr)
-    {
-      idxItem->deleted = true;
-    }
-    return;
+  // if the key exists, set to deleted and decrement #elements
+  HASH_INDEX_T idx = this->probe(key);
+  if(idx != npos && table_[idx] != nullptr)
+  {
+    table_[idx]->deleted = true;
+    numElements--;
+  }
+  return;
 }
 
 
@@ -460,29 +468,32 @@ void HashTable<K,V,Prober,Hash,KEqual>::resize()
   {
     throw std::logic_error("Out of resizes");
   }
+
   mIndex_++;
   // new table resized to next prime value in CAPACITIES
-  std::vector<ItemType> oldTable;
-  for(size_t i = 0; i < table_.size(); i++)
+  std::vector<HashItem*> newTable(CAPACITIES[mIndex_], nullptr);
+  std::swap(table_, newTable);
+
+  // preserving # elements from insert used later
+  int originalElementSize = numElements;
+
+  for(size_t i = 0; i < newTable.size(); i++)
   {
-    if(table_[i] == nullptr)
+    if(newTable[i] == nullptr)
     {
       continue;
     }
-    else if(!table_[i]->deleted)
+    // if element exists and isn't deleted, insert into resized table
+    else if(!newTable[i]->deleted)
     {
-      oldTable.push_back(table_[i]->item);
+      insert(newTable[i]->item);
     }
-    delete table_[i];
-    table_[i] = nullptr;
+    delete newTable[i];
   }
 
-  table_.resize(CAPACITIES[mIndex_], nullptr);
-
-  for(size_t i = 0; i < oldTable.size(); i++)
-  {
-      insert(oldTable[i]);   
-  }
+  // restore value of elements and total (+deleted) elements
+  numElements = originalElementSize;
+  totalNumElements = numElements;
 }
 
 // Almost complete
@@ -501,7 +512,7 @@ HASH_INDEX_T HashTable<K,V,Prober,Hash,KEqual>::probe(const KeyType& key) const
         }
         // fill in the condition for this else if statement which should 
         // return 'loc' if the given key exists at this location
-        else if(table_[loc] != nullptr && table_[loc]->item.first == key) {
+        else if(table_[loc]->item.first == key && table_[loc]->deleted == false) {
             return loc;
         }
         loc = prober_.next();
